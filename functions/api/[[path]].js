@@ -1,3 +1,47 @@
+const enc = new TextEncoder();
+
+function hex(buf) {
+  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function hmac(secret, msg) {
+  const key = await crypto.subtle.importKey('raw', enc.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  return hex(await crypto.subtle.sign('HMAC', key, enc.encode(msg)));
+}
+
+function getCookie(request, name) {
+  const c = request.headers.get('Cookie') || '';
+  for (const part of c.split(';')) {
+    const kv = part.trim().split('=');
+    if (kv[0] === name) return kv.slice(1).join('=');
+  }
+  return null;
+}
+
+async function isAuthed(request, env) {
+  const botToken = request.headers.get('x-bot-token');
+  if (env.BOT_TOKEN && botToken && botToken === env.BOT_TOKEN) return true;
+  const tok = getCookie(request, 'bdauth');
+  if (!tok || !env.AUTH_SECRET) return false;
+  const idx = tok.lastIndexOf('.');
+  if (idx < 0) return false;
+  const payload = tok.slice(0, idx);
+  const sig = tok.slice(idx + 1);
+  const sep = payload.indexOf('|');
+  if (sep < 0) return false;
+  const exp = parseInt(payload.slice(sep + 1), 10);
+  if (!exp || Date.now() > exp) return false;
+  const expect = await hmac(env.AUTH_SECRET, payload);
+  return sig === expect;
+}
+
+function jsonError(status, message) {
+  return new Response(JSON.stringify({ error: message }), {
+    status,
+    headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+  });
+}
+
 export async function onRequestGet(context) {
   const { env, request } = context;
   const url = new URL(request.url);
@@ -5,13 +49,15 @@ export async function onRequestGet(context) {
 
   const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, X-Bot-Token',
   };
 
   if (request.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
+
+  if (!(await isAuthed(request, env))) return jsonError(401, 'unauthorized');
 
   try {
     if (path === '/api/bots' || path === '/api/bots/') {
@@ -104,13 +150,41 @@ export async function onRequestPost(context) {
 
   const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, X-Bot-Token',
   };
 
   if (request.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
+
+  if (path === '/api/auth' || path === '/api/auth/') {
+    let body;
+    try {
+      body = await request.json();
+    } catch (e) {
+      return jsonError(400, 'Invalid JSON');
+    }
+    const { user, pass } = body;
+    if (!env.AUTH_USER || !env.AUTH_PASS || !env.AUTH_SECRET) {
+      return jsonError(500, 'Auth belum dikonfigurasi di server (set AUTH_USER / AUTH_PASS / AUTH_SECRET)');
+    }
+    if (user !== env.AUTH_USER || pass !== env.AUTH_PASS) {
+      return jsonError(401, 'Username atau password salah');
+    }
+    const exp = Date.now() + 7 * 24 * 3600 * 1000;
+    const payload = user + '|' + exp;
+    const sig = await hmac(env.AUTH_SECRET, payload);
+    return new Response(JSON.stringify({ ok: true }), {
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+        'Set-Cookie': 'bdauth=' + payload + '.' + sig + '; HttpOnly; Secure; Path=/; Max-Age=604800; SameSite=Lax',
+      },
+    });
+  }
+
+  if (!(await isAuthed(request, env))) return jsonError(401, 'unauthorized');
 
   try {
     const body = await request.json();
@@ -160,4 +234,14 @@ export async function onRequestPost(context) {
       status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
     });
   }
+}
+
+export async function onRequestDelete() {
+  return new Response(JSON.stringify({ ok: true }), {
+    headers: {
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*',
+      'Set-Cookie': 'bdauth=; HttpOnly; Secure; Path=/; Max-Age=0; SameSite=Lax',
+    },
+  });
 }
