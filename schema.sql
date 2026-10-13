@@ -22,3 +22,20 @@ CREATE TABLE IF NOT EXISTS bot_logs (
 
 CREATE INDEX IF NOT EXISTS idx_bot_logs_bot_id ON bot_logs(bot_id);
 CREATE INDEX IF NOT EXISTS idx_bot_logs_timestamp ON bot_logs(timestamp);
+
+-- Active cron jobs per bot
+CREATE TABLE IF NOT EXISTS bot_jobs (
+    bot_id TEXT NOT NULL,
+    job_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    schedule TEXT,
+    enabled INTEGER DEFAULT 1,
+    state TEXT,
+    last_status TEXT,
+    last_run_at INTEGER,
+    next_run_at INTEGER,
+    updated_at INTEGER DEFAULT (strftime('%s','now') * 1000),
+    PRIMARY KEY (bot_id, job_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_bot_jobs_bot_id ON bot_jobs(bot_id);

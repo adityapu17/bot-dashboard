@@ -52,6 +52,40 @@ export async function onRequestGet(context) {
       return Response.json({ logs: results }, { headers: corsHeaders });
     }
 
+    if (path === '/api/jobs') {
+      const botId = url.searchParams.get('bot_id');
+      let query = 'SELECT bot_id, job_id, name, schedule, enabled, state, last_status, last_run_at, next_run_at FROM bot_jobs';
+      let bindings = [];
+      if (botId) {
+        query += ' WHERE bot_id = ?';
+        bindings.push(botId);
+      }
+      query += ' ORDER BY bot_id, name';
+      const { results } = await env.DB.prepare(query).bind(...bindings).all();
+      return Response.json({ jobs: results }, { headers: corsHeaders });
+    }
+
+    if (path === '/api/jobs') {
+      const { bot_id, jobs } = body;
+      if (!bot_id || !Array.isArray(jobs)) {
+        return new Response(JSON.stringify({ error: 'bot_id and jobs array required' }), { 
+          status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+        });
+      }
+      const stmts = [env.DB.prepare('DELETE FROM bot_jobs WHERE bot_id = ?').bind(bot_id)];
+      const now = Date.now();
+      for (const j of jobs) {
+        if (!j.job_id || !j.name) continue;
+        stmts.push(env.DB.prepare(
+          'INSERT INTO bot_jobs (bot_id, job_id, name, schedule, enabled, state, last_status, last_run_at, next_run_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)'
+        ).bind(bot_id, String(j.job_id), String(j.name), j.schedule || null,
+               j.enabled ? 1 : 0, j.state || null, j.last_status || null,
+               j.last_run_at || null, j.next_run_at || null, now));
+      }
+      await env.DB.batch(stmts);
+      return Response.json({ ok: true, count: stmts.length - 1 }, { headers: corsHeaders });
+    }
+
     return new Response(JSON.stringify({ error: 'Not found' }), { 
       status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
     });

@@ -45,6 +45,13 @@
     .log-error { background: #fee2e2; color: #991b1b; }
     .log-message { color: #374151; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .empty { text-align: center; padding: 40px; color: #9ca3af; }
+    .job-entry { display: flex; gap: 8px; padding: 6px 8px; background: #f9fafb; border-radius: 4px; margin-bottom: 4px; align-items: center; }
+    .job-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .job-dot.on { background: #10b981; }
+    .job-dot.off { background: #d1d5db; }
+    .job-dot.err { background: #ef4444; }
+    .job-name { font-size: 0.8rem; font-weight: 600; color: #1a1a1a; }
+    .job-meta { font-size: 0.7rem; color: #6b7280; font-family: monospace; }
     .last-updated { font-size: 0.75rem; color: #9ca3af; text-align: right; margin-top: 16px; }
   </style>
 </head>
@@ -171,11 +178,32 @@
               '<details class="bot-logs"><summary>📋 Details (' + Object.keys(details).length + ')</summary><div style="font-size: 0.75rem; font-family: monospace; background: #f9fafb; padding: 8px; border-radius: 4px; max-height: 200px; overflow: auto;">' +
               Object.entries(details).map(([k, v]) => '<div><strong>' + escapeHtml(k) + ':</strong> ' + escapeHtml(JSON.stringify(v)) + '</div>').join('') +
               '</div></details>' : '') +
+            '<details class="bot-logs"><summary>⚙️ Active Jobs</summary><div id="jobs-' + escapeHtml(bot.id) + '">Loading...</div></details>' +
             '<details class="bot-logs"><summary>📜 Logs (klik untuk buka)</summary><div class="bot-logs" id="logs-' + escapeHtml(bot.id) + '">Loading...</div></details>' +
           '</div></div>';
       }).join('');
 
-      bots.forEach(bot => loadBotLogs(bot.id));
+      bots.forEach(bot => { loadBotLogs(bot.id); loadBotJobs(bot.id); });
+    }
+
+    async function loadBotJobs(botId) {
+      try {
+        const { jobs } = await fetchAPI('/jobs?bot_id=' + encodeURIComponent(botId));
+        const c = document.getElementById('jobs-' + botId);
+        if (!jobs.length) {
+          c.innerHTML = '<div style="padding:8px;font-size:0.8rem;color:#9ca3af;">Tidak ada job aktif</div>';
+          return;
+        }
+        c.innerHTML = jobs.map(j => {
+          const dot = j.enabled ? (j.last_status === 'error' ? 'err' : 'on') : 'off';
+          return '<div class="job-entry">' +
+            '<span class="job-dot ' + dot + '"></span>' +
+            '<div><div class="job-name">' + escapeHtml(j.name) + (j.enabled ? '' : ' (paused)') + '</div>' +
+            '<div class="job-meta">' + escapeHtml(j.schedule || '') + ' · last: ' + escapeHtml(j.last_status || '—') + ' · next: ' + (j.next_run_at ? formatRelativeTime(j.next_run_at) : '—') + '</div></div></div>';
+        }).join('');
+      } catch (e) {
+        console.error('Jobs error:', e);
+      }
     }
 
     async function loadBotLogs(botId) {
