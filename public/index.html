@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bot Dashboard</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; min-height: 100vh; padding: 20px; }
+    .container { max-width: 1200px; margin: 0 auto; }
+    header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
+    h1 { color: #1a1a1a; font-size: 1.5rem; }
+    .refresh-btn { background: #3b82f6; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 0.875rem; }
+    .refresh-btn:hover { background: #2563eb; }
+    .refresh-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+    .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 24px; }
+    .stat-card { background: white; padding: 16px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    .stat-value { font-size: 2rem; font-weight: 700; color: #1a1a1a; }
+    .stat-label { font-size: 0.875rem; color: #6b7280; margin-top: 4px; }
+    .stat-running { color: #10b981; }
+    .stat-idle { color: #6b7280; }
+    .stat-error { color: #ef4444; }
+    .stat-unknown { color: #f59e0b; }
+    .bots-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; }
+    .bot-card { background: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); overflow: hidden; transition: transform 0.2s, box-shadow 0.2s; }
+    .bot-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+    .bot-header { padding: 16px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #e5e7eb; }
+    .bot-name { font-weight: 600; font-size: 1rem; color: #1a1a1a; }
+    .status-badge { padding: 4px 10px; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; }
+    .status-running { background: #dcfce7; color: #166534; }
+    .status-idle { background: #f3f4f6; color: #374151; }
+    .status-error { background: #fee2e2; color: #991b1b; }
+    .status-unknown { background: #fef3c7; color: #92400e; }
+    .bot-body { padding: 16px; }
+    .bot-detail { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 0.875rem; }
+    .bot-detail-label { color: #6b7280; }
+    .bot-detail-value { color: #1a1a1a; font-family: monospace; }
+    .bot-logs { margin-top: 12px; padding-top: 12px; border-top: 1px solid #e5e7eb; }
+    .bot-logs summary { cursor: pointer; font-size: 0.875rem; font-weight: 500; color: #3b82f6; margin-bottom: 8px; }
+    .log-entry { display: flex; gap: 8px; padding: 6px 8px; background: #f9fafb; border-radius: 4px; margin-bottom: 4px; font-size: 0.75rem; font-family: monospace; }
+    .log-time { color: #9ca3af; min-width: 80px; }
+    .log-level { padding: 1px 6px; border-radius: 3px; font-weight: 600; text-transform: uppercase; min-width: 50px; }
+    .log-info { background: #dbeafe; color: #1e40af; }
+    .log-warn { background: #fef3c7; color: #92400e; }
+    .log-error { background: #fee2e2; color: #991b1b; }
+    .log-message { color: #374151; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .empty { text-align: center; padding: 40px; color: #9ca3af; }
+    .last-updated { font-size: 0.75rem; color: #9ca3af; text-align: right; margin-top: 16px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>🤖 Bot Dashboard</h1>
+      <button class="refresh-btn" id="refreshBtn" onclick="loadData()">🔄 Refresh</button>
+    </header>
+    
+    <div class="stats" id="stats"></div>
+    
+    <div class="bots-grid" id="botsGrid"></div>
+    
+    <div class="last-updated" id="lastUpdated">Last updated: —</div>
+  </div>
+
+  <script>
+    const API_BASE = '/api';
+    let autoRefreshInterval = null;
+
+    function formatTime(ts) {
+      if (!ts) return '—';
+      const date = new Date(ts);
+      return date.toLocaleString('id-ID', { 
+        day: '2-digit', month: '2-digit', year: 'numeric',
+        hour: '2-digit', minute: '2-digit', second: '2-digit'
+      });
+    }
+
+    function formatRelativeTime(ts) {
+      if (!ts) return '—';
+      const diff = Date.now() - ts;
+      if (diff < 60000) return Math.floor(diff/1000) + 's ago';
+      if (diff < 3600000) return Math.floor(diff/60000) + 'm ago';
+      if (diff < 86400000) return Math.floor(diff/3600000) + 'h ago';
+      return Math.floor(diff/86400000) + 'd ago';
+    }
+
+    async function fetchAPI(path, options = {}) {
+      const res = await fetch(API_BASE + path, {
+        headers: { 'Content-Type': 'application/json' },
+        ...options
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      return res.json();
+    }
+
+    async function loadData() {
+      const btn = document.getElementById('refreshBtn');
+      btn.disabled = true;
+      btn.textContent = '⏳ Loading...';
+      
+      try {
+        const { bots } = await fetchAPI('/bots');
+        renderStats(bots);
+        renderBots(bots);
+        document.getElementById('lastUpdated').textContent = 
+          'Last updated: ' + new Date().toLocaleTimeString('id-ID');
+      } catch (e) {
+        console.error('Load error:', e);
+        document.getElementById('botsGrid').innerHTML = 
+          '<div class="empty">❌ Gagal load data: ' + e.message + '</div>';
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '🔄 Refresh';
+      }
+    }
+
+    function renderStats(bots) {
+      const stats = { running: 0, idle: 0, error: 0, unknown: 0 };
+      bots.forEach(b => { stats[b.status] = (stats[b.status] || 0) + 1; });
+      
+      const statConfig = [
+        { key: 'running', label: 'Running', class: 'stat-running' },
+        { key: 'idle', label: 'Idle', class: 'stat-idle' },
+        { key: 'error', label: 'Error', class: 'stat-error' },
+        { key: 'unknown', label: 'Unknown', class: 'stat-unknown' },
+      ];
+      
+      document.getElementById('stats').innerHTML = statConfig.map(s => 
+        '<div class="stat-card"><div class="stat-value ' + s.class + '">' + (stats[s.key] || 0) + '</div><div class="stat-label">' + s.label + '</div></div>'
+      ).join('');
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    function formatTime(ts) {
+      if (!ts) return '—';
+      const date = new Date(ts);
+      return date.toLocaleString('id-ID', { 
+        day: '2-digit', month: '2-digit', year: 'numeric',
+        hour: '2-digit', minute: '2-digit', second: '2-digit'
+      });
+    }
+
+    function formatRelativeTime(ts) {
+      if (!ts) return '—';
+      const diff = Date.now() - ts;
+      if (diff < 60000) return Math.floor(diff/1000) + 's ago';
+      if (diff < 3600000) return Math.floor(diff/60000) + 'm ago';
+      if (diff < 86400000) return Math.floor(diff/3600000) + 'h ago';
+      return Math.floor(diff/86400000) + 'd ago';
+    }
+
+    function renderBots(bots) {
+      const grid = document.getElementById('botsGrid');
+      if (!bots.length) {
+        grid.innerHTML = '<div class="empty">📭 Belum ada bot terdaftar</div>';
+        return;
+      }
+      
+      grid.innerHTML = bots.map(bot => {
+        const details = bot.details ? JSON.parse(bot.details) : {};
+        return '<div class="bot-card" data-id="' + bot.id + '">' +
+          '<div class="bot-header"><span class="bot-name">' + escapeHtml(bot.name) + '</span><span class="status-badge status-' + bot.status + '">' + bot.status + '</span></div>' +
+          '<div class="bot-body">' +
+            '<div class="bot-detail"><span class="bot-detail-label">ID</span><span class="bot-detail-value">' + escapeHtml(bot.id) + '</span></div>' +
+            '<div class="bot-detail"><span class="bot-detail-label">Last Update</span><span class="bot-detail-value">' + formatTime(bot.last_update) + ' (' + formatRelativeTime(bot.last_update) + ')</span></div>' +
+            (Object.keys(details).length ? 
+              '<details class="bot-logs"><summary>📋 Details (' + Object.keys(details).length + ')</summary><div style="font-size: 0.75rem; font-family: monospace; background: #f9fafb; padding: 8px; border-radius: 4px; max-height: 200px; overflow: auto;">' +
+              Object.entries(details).map(([k, v]) => '<div><strong>' + escapeHtml(k) + ':</strong> ' + escapeHtml(JSON.stringify(v)) + '</div>').join('') +
+              '</div></details>' : '') +
+            '<details class="bot-logs"><summary>📜 Logs (klik untuk buka)</summary><div class="bot-logs" id="logs-' + escapeHtml(bot.id) + '">Loading...</div></details>' +
+          '</div></div>';
+      }).join('');
+
+      bots.forEach(bot => loadBotLogs(bot.id));
+    }
+
+    async function loadBotLogs(botId) {
+      try {
+        const { logs } = await fetchAPI('/logs?bot_id=' + encodeURIComponent(botId));
+        const container = document.getElementById('logs-' + botId);
+        if (!logs.length) {
+          container.innerHTML = '<div class="empty" style="padding: 16px; font-size: 0.875rem;">Belum ada log</div>';
+          return;
+        }
+        container.innerHTML = logs.map(log => 
+          '<div class="log-entry"><span class="log-time">' + formatTime(log.timestamp) + '</span><span class="log-level log-' + log.level + '">' + log.level + '</span><span class="log-message">' + escapeHtml(log.message) + '</span></div>'
+        ).join('');
+      } catch (e) {
+        console.error('Logs error:', e);
+      }
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    function formatTime(ts) {
+      if (!ts) return '—';
+      const date = new Date(ts);
+      return date.toLocaleString('id-ID', { 
+        day: '2-digit', month: '2-digit', year: 'numeric',
+        hour: '2-digit', minute: '2-digit', second: '2-digit'
+      });
+    }
+
+    function formatRelativeTime(ts) {
+      if (!ts) return '—';
+      const diff = Date.now() - ts;
+      if (diff < 60000) return Math.floor(diff/1000) + 's ago';
+      if (diff < 3600000) return Math.floor(diff/60000) + 'm ago';
+      if (diff < 86400000) return Math.floor(diff/3600000) + 'h ago';
+      return Math.floor(diff/86400000) + 'd ago';
+    }
+
+    // Initial load
+    loadData();
+
+    // Auto-refresh every 30 seconds
+    const autoRefreshInterval = setInterval(loadData, 30000);
+
+    window.addEventListener('beforeunload', () => {
+      clearInterval(autoRefreshInterval);
+    });
+  </script>
+</body>
+</html>

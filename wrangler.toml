@@ -1,0 +1,8 @@
+name = "bot-dashboard"
+compatibility_date = "2024-12-01"
+pages_build_output_dir = "public"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "bot-dashboard-db"
+database_id = "<will-fill-after-create>"
