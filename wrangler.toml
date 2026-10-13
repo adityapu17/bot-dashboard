@@ -5,4 +5,4 @@ pages_build_output_dir = "public"
 [[d1_databases]]
 binding = "DB"
 database_name = "bot-dashboard-db"
-database_id = "ea7731ee-e95b-4c2b-840b-5a7f3a1d588"
+database_id = "ea7731ee-e95b-4c2b-840b-5a7f3a1d5885"
